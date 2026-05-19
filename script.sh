@@ -7,10 +7,12 @@ GITHUB_REPO="https://github.com/z-Eduard005/fedora-overhaul.git"
 MC_INSTALLER='sh -c "$(curl -fsSL https://raw.githubusercontent.com/z-Eduard005/fedora-mc-installer/main/mc-installer.sh)"'
 OBS_HOTKEYS_INSTALLER='sh -c "$(curl -fsSL https://raw.githubusercontent.com/z-Eduard005/gnome-obs-hotkeys/main/install.sh)"'
 VICINAE_INSTALLER='sh -c "$(curl -fsSL https://raw.githubusercontent.com/z-Eduard005/gnome-vicinae-installer/main/install.sh)"'
+ADWAITA_COLORS_INSTALLER='sh -c "$(curl -fsSL https://raw.githubusercontent.com/dpejoh/Adwaita-Colors/main/setup)" "" -i'
 OMZ_INSTALLER='sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended'
 YTM_DOWNLOAD_URL="https://api.github.com/repos/pear-devs/pear-desktop/releases/latest"
 WIN_FONTS_PKG="https://downloads.sourceforge.net/project/mscorefonts2/rpms/msttcore-fonts-installer-2.6-1.noarch.rpm"
-EXT_CLI="$HOME/.local/bin/gnome-extensions-cli"
+LOCAL_BIN_DIR="$HOME/.local/bin"
+EXT_CLI="$LOCAL_BIN_DIR/gnome-extensions-cli"
 WALLPAPERS_DIR="$HOME/.local/share/backgrounds"
 CURSORS_DIR="$HOME/.local/share/icons"
 WALLPAPER_FILENAMES=(windows.jpg macos.png linux.jpg)
@@ -19,6 +21,7 @@ ADWAITA_ICONS_DIR="/usr/share/icons/Adwaita"
 ADWAITA_ACTIONS_ICONS_DIR="$ADWAITA_ICONS_DIR/scalable/actions"
 PROJECT_DIR="/opt/fedora-overhaul"
 LIBREOFFICE_USER_DIR="$HOME/.config/libreoffice/4/user"
+SERVICE_DIR="$HOME/.config/systemd/user"
 DTP_CONF_PATH="/org/gnome/shell/extensions/dash-to-panel/"
 COMPLETE_SOUND_FILE="/usr/share/sounds/freedesktop/stereo/complete.oga"
 STEAMAPPS_DIR="$HOME/.steam/steam/steamapps"
@@ -42,6 +45,7 @@ DNF_PKGS=(
   "cabextract"
   "xorg-x11-font-utils"
   "fontconfig"
+  "adw-gtk3-theme"
   "steam|com.valvesoftware.Steam"
 )
 FLATHUB_PKGS=(
@@ -128,36 +132,53 @@ while true; do
 done 2>/dev/null &
 
 echo "###########################"
-echo "## Fedora Overhaul 0.1.0 ##"
+echo "## Fedora Overhaul 0.2.0 ##"
 echo "###########################"
 echo ""
 
-step="[0|13]: Downloading the program data"
+step="[0|14]: Downloading the program data"
 run_the_step && {
-  sudo rm -rf "$PROJECT_DIR"
-  sudo mkdir -p "$PROJECT_DIR" "$KERNEL_POSTINST_DIR" "$ADWAITA_ACTIONS_ICONS_DIR"
-  mkdir -p "$WALLPAPERS_DIR" "$LIBREOFFICE_USER_DIR"
-  sudo git clone --depth=1 "$GITHUB_REPO" "$PROJECT_DIR" || throw_err "Error while downloading the program data"
-  sudo rm -rf "$PROJECT_DIR/.gitignore" "$PROJECT_DIR/.git/" "$PROJECT_DIR/docs/" "$PROJECT_DIR/rpmbuild/" "$PROJECT_DIR/build.sh"
-  sudo touch "$STATE_FILE"
+  (
+    set -e
+    if mokutil --sb-state | grep -q "enabled"; then
+      throw_err "Secure Boot is enabled. Please disable Secure Boot in your BIOS/UEFI settings and run the script again."
+    fi
+
+    sudo rm -rf "$PROJECT_DIR"
+    sudo mkdir -p "$PROJECT_DIR" "$KERNEL_POSTINST_DIR" "$ADWAITA_ACTIONS_ICONS_DIR"
+    mkdir -p "$WALLPAPERS_DIR" "$LIBREOFFICE_USER_DIR" "$SERVICE_DIR"
+    sudo git clone --depth=1 "$GITHUB_REPO" "$PROJECT_DIR"
+    sudo rm -rf "$PROJECT_DIR/.gitignore" "$PROJECT_DIR/.git/" "$PROJECT_DIR/docs/" "$PROJECT_DIR/rpmbuild/" "$PROJECT_DIR/build.sh"
+    sudo touch "$STATE_FILE"
+  ) || throw_err "Error while downloading the program data"
 } && save_step
 
-step="[1|13]: Configuring system package manager"; log_step
-set_dnf_conf_option "max_parallel_downloads" "15"
-set_dnf_conf_option "fastestmirror" "True"
-set_dnf_conf_option "installonly_limit" "2"
+step="[1|14]: Configuring system package manager"; log_step
+run_the_step && {
+  (
+    set -e
+    set_dnf_conf_option "max_parallel_downloads" "15"
+    set_dnf_conf_option "fastestmirror" "True"
+    set_dnf_conf_option "installonly_limit" "2"
+  ) || throw_err "Failed to configure system package manager"
+} && save_step
 
-step="[2|13]: Updating the system"; log_step
-sudo dnf upgrade --refresh -y --skip-unavailable && sudo flatpak update || {
-  sudo dnf install -y tor
-  sudo systemctl start tor
-  sudo all_proxy="socks5://127.0.0.1:9050" dnf upgrade --refresh -y --skip-unavailable
-  sudo all_proxy="socks5://127.0.0.1:9050" flatpak update
-}
-sudo fwupdmgr refresh --force >/dev/null 2>&1
-sudo fwupdmgr update -y >/dev/null 2>&1
+step="[2|14]: Updating the system"; log_step
+run_the_step && {
+  (
+    set -e
+    sudo dnf upgrade --refresh -y --skip-unavailable && sudo flatpak update || {
+      sudo dnf install -y tor
+      sudo systemctl start tor
+      sudo all_proxy="socks5://127.0.0.1:9050" dnf upgrade --refresh -y --skip-unavailable
+      sudo all_proxy="socks5://127.0.0.1:9050" flatpak update
+    }
+    sudo fwupdmgr refresh --force >/dev/null 2>&1
+    sudo fwupdmgr update -y >/dev/null 2>&1
+  ) || throw_err "Failed to update the system"
+} && save_step
 
-step="[3|13]: Installing essential drivers and codecs"
+step="[3|14]: Installing essential drivers and codecs"
 run_the_step && {
   (
     set -e
@@ -165,6 +186,9 @@ run_the_step && {
     sudo dnf install -y "${MEDIA_CODEC_PKGS[@]}" --allowerasing
     if is_gpu "amd"; then
       sudo dnf swap -y "${AMD_DRIVER_SWAP_PKG[@]}"
+      if ! is_gpu "nvidia"; then
+        sudo flatpak install -y flathub "LACT"
+      fi
     fi
     if is_gpu "intel"; then
       sudo dnf install -y "${INTEL_DRIVER_PKGS[@]}"
@@ -175,7 +199,7 @@ run_the_step && {
   ) || throw_err "Error while installing essential drivers and codecs"
 } && save_step
 
-step="[4|13]: Installing cachyos kernel (for better performance)"
+step="[4|14]: Installing cachyos kernel (for better performance)"
 run_the_step && {
   (
     set -e
@@ -201,7 +225,7 @@ EOF
   ) || throw_err "Error while installing cachyos kernel"
 } && save_step
 
-step="[5|13]: Installing essential programs"
+step="[5|14]: Installing essential programs"
 run_the_step && {
   declare -A installed=(
     [rpm]="$(rpm -qa --qf '%{NAME}\n' 2>/dev/null)"
@@ -271,6 +295,7 @@ run_the_step && {
     [[ ${#final_flathub[@]} -gt 0 ]] && sudo flatpak install -y flathub "${final_flathub[@]}"
     [[ ${#final_fedora[@]} -gt 0 ]] && sudo flatpak install -y fedora "${final_fedora[@]}"
     pip3 install "$(basename $EXT_CLI)"
+    eval "$ADWAITA_COLORS_INSTALLER"
     [ -d "$HOME/.oh-my-zsh" ] || eval "$OMZ_INSTALLER"
     if ! rpm -q msttcore-fonts-installer >/dev/null 2>&1; then
       sudo rpm --nodigest -i "$WIN_FONTS_PKG"
@@ -278,64 +303,101 @@ run_the_step && {
   ) || throw_err "Error while installing essential programs"
 } && save_step
 
-step="[6|13]: Removing unnecessary programs"
+step="[6|14]: Removing unnecessary programs"
 run_the_step && {
   sudo dnf remove -y "${REMOVE_PKGS[@]}" || throw_err "Error while removing unnecessary programs"
 } && save_step
 
-step="[7|13]: Make the system start faster"
+step="[7|14]: Make the grub start faster"
 run_the_step && {
-  sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' /etc/default/grub
-  sudo grub2-mkconfig -o /boot/grub2/grub.cfg || throw_err "Error while generating grub config"
+  (
+    set -e
+    sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=3/' /etc/default/grub
+    sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+  ) || throw_err "Error while generating grub config"
 } && save_step
 
-step="[8|13]: Tweaking terminal"
+step="[8|14]: Tweaking terminal"
 run_the_step && {
-  if ! grep -q 'source ~/.bashrc' "$HOME/.zshrc"; then
-    echo -e "\n# Source the .bashrc config\n[ -f ~/.bashrc ] && source ~/.bashrc" >> "$HOME/.zshrc"
-  fi
-  if grep -q ' . /etc/bashrc' "$HOME/.bashrc"; then
-    sed -i 's| . /etc/bashrc|#. /etc/bashrc|' "$HOME/.bashrc"
-  fi
-  if [ "$SHELL" != "$(which zsh)" ]; then
-    chsh -s "$(which zsh)"
-  fi
+  (
+    set -e
+    if ! grep -q 'source ~/.bashrc' "$HOME/.zshrc"; then
+      echo -e "\n# Source the .bashrc config\n[ -f ~/.bashrc ] && source ~/.bashrc" >> "$HOME/.zshrc"
+    fi
+    sed -i 's|^ *\. /etc/bashrc|# &\n:|' "$HOME/.bashrc"
+    if [ "$SHELL" != "$(which zsh)" ]; then
+      chsh -s "$(which zsh)"
+    fi
+  ) || throw_err "Error setting up terminal"
 } && save_step
 
-step="[9|13]: Changing default music app"
+step="[9|14]: Changing default music app"
 run_the_step && {
   flatpak list --app | grep -q "com.github.neithern.g4music" && xdg-mime default com.github.neithern.g4music.desktop audio/mpeg audio/flac audio/x-wav audio/ogg || echo "$(warn "Failed to set default music app")"
 } && save_step
 
-step="[10|13]: Tweaking system settings"
+step="[10|14]: Tweaking system settings"
 run_the_step && {
-  powerprofilesctl set performance >/dev/null 2>&1 || true
-  gsettings set org.gnome.desktop.interface enable-hot-corners false
-  gsettings set org.gnome.shell.app-switcher current-workspace-only true
-  gsettings set org.gnome.mutter dynamic-workspaces false
-  gsettings set org.gnome.desktop.wm.preferences num-workspaces 4
-  gsettings set org.gnome.desktop.input-sources per-window true
-  gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close'
-  gsettings set org.gnome.desktop.wm.preferences resize-with-right-button true
-  gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "['<Shift><Control><Alt>space']"
-  gsettings set org.gnome.desktop.wm.keybindings close "['<Alt>w']"
-  gsettings set org.gnome.shell favorite-apps "['org.gnome.Ptyxis.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Settings.desktop', 'com.mattjakeman.ExtensionManager.desktop', 'org.gnome.Software.desktop', 'org.gnome.TextEditor.desktop', 'org.gnome.SystemMonitor.desktop', 'org.mozilla.firefox.desktop', 'steam.desktop']"
-  gsettings set org.gnome.desktop.input-sources xkb-options "['grp:caps_toggle','lv3:ralt_switch']"
-  gsettings set org.gnome.nautilus.icon-view default-zoom-level 'small-plus'
-  gsettings set org.gnome.nautilus.list-view default-zoom-level 'medium'
-  gsettings set org.gnome.nautilus.preferences default-folder-viewer 'list-view'
-  gsettings set org.gtk.gtk4.Settings.FileChooser sort-directories-first true
+  (
+    set -e
+    powerprofilesctl set performance >/dev/null 2>&1 || true
+    gsettings set org.gnome.desktop.interface enable-hot-corners false
+    gsettings set org.gnome.shell.app-switcher current-workspace-only true
+    gsettings set org.gnome.mutter dynamic-workspaces false
+    gsettings set org.gnome.desktop.wm.preferences num-workspaces 4
+    gsettings set org.gnome.desktop.input-sources per-window true
+    gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close'
+    gsettings set org.gnome.desktop.wm.preferences resize-with-right-button true
+    gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "['<Shift><Control><Alt>space']"
+    gsettings set org.gnome.desktop.wm.keybindings close "['<Alt>w']"
+    gsettings set org.gnome.shell favorite-apps "['org.gnome.Ptyxis.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Settings.desktop', 'com.mattjakeman.ExtensionManager.desktop', 'org.gnome.Software.desktop', 'org.gnome.TextEditor.desktop', 'org.gnome.SystemMonitor.desktop', 'org.mozilla.firefox.desktop', 'steam.desktop']"
+    gsettings set org.gnome.desktop.input-sources xkb-options "['grp:caps_toggle','lv3:ralt_switch']"
+    gsettings set org.gnome.nautilus.icon-view default-zoom-level 'small-plus'
+    gsettings set org.gnome.nautilus.list-view default-zoom-level 'medium'
+    gsettings set org.gnome.nautilus.preferences default-folder-viewer 'list-view'
+    gsettings set org.gtk.gtk4.Settings.FileChooser sort-directories-first true
+    gsettings set org.gnome.desktop.interface gtk-enable-primary-paste false
 
-  sudo cp "$PROJECT_DIR/data/registrymodifications.xcu" "$LIBREOFFICE_USER_DIR/registrymodifications.xcu"
-  for f in "${TEMPLATE_FILENAMES[@]}"; do
-    sudo cp "$PROJECT_DIR/data/$f" "$HOME/Templates/$f"
-  done
-  sed -i "1s|^|file://$STEAMAPPS_DIR Steamapps\n|" "$BOOKMARKS_FILE"
-  sed -i "1s|^|file://$WALLPAPERS_DIR Wallpapers\n|" "$BOOKMARKS_FILE"
-  nautilus -q >/dev/null 2>&1 || true
+    sudo cp "$PROJECT_DIR/data/registrymodifications.xcu" "$LIBREOFFICE_USER_DIR/registrymodifications.xcu"
+    for f in "${TEMPLATE_FILENAMES[@]}"; do
+      sudo cp "$PROJECT_DIR/data/$f" "$HOME/Templates/$f"
+    done
+    sed -i "1s|^|file://$STEAMAPPS_DIR Steamapps\n|" "$BOOKMARKS_FILE"
+    sed -i "1s|^|file://$WALLPAPERS_DIR Wallpapers\n|" "$BOOKMARKS_FILE"
+    nautilus -q >/dev/null 2>&1 || true
+  ) || throw_err "System settings are not configured correctly"
 } && save_step
 
-step="[11|13]: Installing essential gnome extensions"
+step="[11|14]: Unifying appearance of GNOME applications"
+run_the_step && {
+  (
+    set -e
+    # TEST FIRST WITHOUT THIS!!!
+    # sudo cp "" "$LOCAL_BIN_DIR/overhaul-watch.sh"
+
+    cat > "$SERVICE_DIR/overhaul-watch.service" <<EOF
+[Unit]
+Description=Fedora Overhaul watcher
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$PROJECT_DIR/overhaul-watch.sh
+Restart=on-failure
+RestartSec=3
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+    systemctl --user daemon-reload
+    systemctl --user enable overhaul-watch.service
+    systemctl --user restart overhaul-watch.service
+  ) || throw_err "Error while unifying appearance of GNOME applications"
+} && save_step
+
+step="[12|14]: Installing essential gnome extensions"
 run_the_step && {
   $EXT_CLI install appindicatorsupport@rgcjonas.gmail.com quick-lang-switch@ankostis.gmail.com blur-my-shell@aunetx just-perfection-desktop@just-perfection Vitals@CoreCoding.com hidetopbar@mathieu.bidon.ca rounded-window-corners@fxgn color-picker@tuberry dash-to-panel@jderose9.github.com dash-to-dock@micxgx.gmail.com gtk4-ding@smedius.gitlab.com || throw_err "Error while installing gnome extensions"
   ext_cli_disable background-logo@fedorahosted.org Vitals@CoreCoding.com hidetopbar@mathieu.bidon.ca rounded-window-corners@fxgn color-picker@tuberry dash-to-panel@jderose9.github.com dash-to-dock@micxgx.gmail.com gtk4-ding@smedius.gitlab.com || echo "$(warn "Some extensions are not disabled, so you might see some visual issues, disable them, if you need, in Extensions Manager app")"
@@ -348,14 +410,17 @@ step="Initialising steam"
 
 step="Copying wallpapers and cursor files"
 ! is_step_done && {
-  for f in "${WALLPAPER_FILENAMES[@]}"; do
-    sudo cp "$PROJECT_DIR/data/wallpapers/$f" "$WALLPAPERS_DIR/$f"
-  done
-  sudo cp -r "$PROJECT_DIR/data/macOS/" "$CURSORS_DIR"
-  gsettings set org.gnome.desktop.interface cursor-theme "macOS"
+  (
+    set -e
+    for f in "${WALLPAPER_FILENAMES[@]}"; do
+      sudo cp "$PROJECT_DIR/data/wallpapers/$f" "$WALLPAPERS_DIR/$f"
+    done
+    sudo cp -r "$PROJECT_DIR/data/macOS/" "$CURSORS_DIR"
+    gsettings set org.gnome.desktop.interface cursor-theme "macOS"
+  ) || echo "$(warn "Wallpapers and cursor may not be set. If so, try again")"
 } && save_step
 
-step="[12|13]: Setting up look of your desktop"; log_step
+step="[13|14]: Setting up look of your desktop"; log_step
 SELECTED_LOOK=$(zenity --list --radiolist \
   --title="Desktop Look" \
   --text="Choose the look of your desktop:" \
@@ -420,7 +485,7 @@ sudo cp "$PROJECT_DIR/data/view-app-grid-symbolic.svg" "$ADWAITA_ACTIONS_ICONS_D
 sudo gtk-update-icon-cache "$ADWAITA_ICONS_DIR"
 $EXT_CLI update >/dev/null 2>&1
 
-step="[13|13]: Installing selected programs"; log_step
+step="[14|14]: Installing selected programs"; log_step
 (
   set -e
   if selected "color-picker"; then
