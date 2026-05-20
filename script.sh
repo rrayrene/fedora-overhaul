@@ -7,10 +7,11 @@ GITHUB_REPO="https://github.com/z-Eduard005/fedora-overhaul.git"
 MC_INSTALLER='sh -c "$(curl -fsSL https://raw.githubusercontent.com/z-Eduard005/fedora-mc-installer/main/mc-installer.sh)"'
 OBS_HOTKEYS_INSTALLER='sh -c "$(curl -fsSL https://raw.githubusercontent.com/z-Eduard005/gnome-obs-hotkeys/main/install.sh)"'
 VICINAE_INSTALLER='sh -c "$(curl -fsSL https://raw.githubusercontent.com/z-Eduard005/gnome-vicinae-installer/main/install.sh)"'
-ADWAITA_COLORS_INSTALLER='sh -c "$(curl -fsSL https://raw.githubusercontent.com/dpejoh/Adwaita-Colors/main/setup)" "" -i'
 OMZ_INSTALLER='sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended'
 YTM_DOWNLOAD_URL="https://api.github.com/repos/pear-devs/pear-desktop/releases/latest"
 WIN_FONTS_PKG="https://downloads.sourceforge.net/project/mscorefonts2/rpms/msttcore-fonts-installer-2.6-1.noarch.rpm"
+ADW_COLORS_REPO="https://github.com/dpejoh/Adwaita-colors"
+TMP_ADW_COLORS_DIR="/tmp/Adwaita-colors"
 LOCAL_BIN_DIR="$HOME/.local/bin"
 EXT_CLI="$LOCAL_BIN_DIR/gnome-extensions-cli"
 WALLPAPERS_DIR="$HOME/.local/share/backgrounds"
@@ -69,21 +70,21 @@ info() { printf "\033[1;34m%s\033[0m" "$1"; }
 throw_err() {
   echo -e "$(err "$1\nTry one more time...")"
   pw-play "$COMPLETE_SOUND_FILE"
-  zenity --info \
-  --title="Error happend:" \
-  --text="$1" \
-  --width=960 --height=540
+  yad --error \
+    --title="Error happened" \
+    --button="OK:0" \
+    --text="<span font='14'>$1</span>"
   exit 1
 }
 
 ask_confirm() {
-  zenity --question \
-  --title="Confirmation" \
-  --width=400 \
-  --height=100 \
-  --ok-label="Yes" \
-  --cancel-label="No" \
-  --text="$1"
+  yad --question \
+    --title="Confirmation" \
+    --width=400 \
+    --height=100 \
+    --button="Yes:0" \
+    --button="No:1" \
+    --text="<span font='14'>$1</span>"
 }
 
 set_dnf_conf_option() {
@@ -153,7 +154,7 @@ run_the_step && {
   ) || throw_err "Error while downloading the program data"
 } && save_step
 
-step="[1|14]: Configuring system package manager"; log_step
+step="[1|14]: Configuring system package manager"
 run_the_step && {
   (
     set -e
@@ -163,7 +164,7 @@ run_the_step && {
   ) || throw_err "Failed to configure system package manager"
 } && save_step
 
-step="[2|14]: Updating the system"; log_step
+step="[2|14]: Updating the system"
 run_the_step && {
   (
     set -e
@@ -295,11 +296,14 @@ run_the_step && {
     [[ ${#final_flathub[@]} -gt 0 ]] && sudo flatpak install -y flathub "${final_flathub[@]}"
     [[ ${#final_fedora[@]} -gt 0 ]] && sudo flatpak install -y fedora "${final_fedora[@]}"
     pip3 install "$(basename $EXT_CLI)"
-    eval "$ADWAITA_COLORS_INSTALLER"
     [ -d "$HOME/.oh-my-zsh" ] || eval "$OMZ_INSTALLER"
     if ! rpm -q msttcore-fonts-installer >/dev/null 2>&1; then
       sudo rpm --nodigest -i "$WIN_FONTS_PKG"
     fi
+    
+    git clone "$ADW_COLORS_REPO" "$TMP_ADW_COLORS_DIR"
+    "$TMP_ADW_COLORS_DIR/setup" -i
+    rm -rf "$TMP_ADW_COLORS_DIR"
   ) || throw_err "Error while installing essential programs"
 } && save_step
 
@@ -372,9 +376,6 @@ step="[11|14]: Unifying appearance of GNOME applications"
 run_the_step && {
   (
     set -e
-    # TEST FIRST WITHOUT THIS!!!
-    # sudo cp "" "$LOCAL_BIN_DIR/overhaul-watch.sh"
-
     cat > "$SERVICE_DIR/overhaul-watch.service" <<EOF
 [Unit]
 Description=Fedora Overhaul watcher
@@ -400,12 +401,7 @@ EOF
 step="[12|14]: Installing essential gnome extensions"
 run_the_step && {
   $EXT_CLI install appindicatorsupport@rgcjonas.gmail.com quick-lang-switch@ankostis.gmail.com blur-my-shell@aunetx just-perfection-desktop@just-perfection Vitals@CoreCoding.com hidetopbar@mathieu.bidon.ca rounded-window-corners@fxgn color-picker@tuberry dash-to-panel@jderose9.github.com dash-to-dock@micxgx.gmail.com gtk4-ding@smedius.gitlab.com || throw_err "Error while installing gnome extensions"
-  ext_cli_disable background-logo@fedorahosted.org Vitals@CoreCoding.com hidetopbar@mathieu.bidon.ca rounded-window-corners@fxgn color-picker@tuberry dash-to-panel@jderose9.github.com dash-to-dock@micxgx.gmail.com gtk4-ding@smedius.gitlab.com || echo "$(warn "Some extensions are not disabled, so you might see some visual issues, disable them, if you need, in Extensions Manager app")"
-} && save_step
-
-step="Initialising steam"
-! is_step_done && {
-  steam -silent > /dev/null 2>&1 & disown
+  ext_cli_disable Vitals@CoreCoding.com hidetopbar@mathieu.bidon.ca rounded-window-corners@fxgn color-picker@tuberry dash-to-panel@jderose9.github.com dash-to-dock@micxgx.gmail.com gtk4-ding@smedius.gitlab.com background-logo@fedorahosted.org || echo "$(warn "Some extensions are not disabled, so you might see some visual issues, disable them, if you need, in Extensions Manager app")"
 } && save_step
 
 step="Copying wallpapers and cursor files"
@@ -420,28 +416,39 @@ step="Copying wallpapers and cursor files"
   ) || echo "$(warn "Wallpapers and cursor may not be set. If so, try again")"
 } && save_step
 
+step="Initialising steam"
+! is_step_done && {
+  steam -silent > /dev/null 2>&1 & disown
+} && save_step
+
 step="[13|14]: Setting up look of your desktop"; log_step
-SELECTED_LOOK=$(zenity --list --radiolist \
+SELECTED_LOOK=$(yad --list --radiolist \
   --title="Desktop Look" \
   --text="Choose the look of your desktop:" \
   --column="" --column="Look" \
-  FALSE "macos" FALSE "windows" TRUE "linux" \
-  --width=480 --height=480)
+  FALSE "macos" \
+  FALSE "windows" \
+  TRUE "linux" \
+  --width=400 \
+  --height=400)
 
-PROGRAMS=$(zenity --list --checklist \
+PROGRAMS=$(yad --list --checklist \
   --title="Programs to install" \
   --text="Select programs then click OK:" \
-  --column="Install" --column="ID" --column="Description" \
+  --column="Install:CHK" \
+  --column="ID" \
+  --column="Description" \
   --separator=" " \
   FALSE "color-picker"    "Color Picker (GNOME Extension)" \
   FALSE "rounded-corners" "Rounded Window Corners (GNOME Extension)" \
   FALSE "hidetopbar"      "Hide Top Bar (GNOME Extension)" \
   FALSE "vitals"          "Vitals - system monitor" \
   FALSE "youtube-music"   "YouTube Music App" \
-  FALSE "vicinae"         "Vicinae - launcher & clipboard manager" \
-  FALSE "obs-hotkeys"     "Fix OBS recording hotkeys (you want this if you will record with obs)" \
+  FALSE "vicinae"         "Vicinae - launcher &amp; clipboard manager" \
+  FALSE "obs-hotkeys"     "Fix OBS recording hotkeys (you want this if you will record with OBS)" \
   FALSE "minecraft"       "Minecraft (FREE VERSION)" \
-  --width=960 --height=540)
+  --width=800 \
+  --height=400)
 
 selected() { echo "$PROGRAMS" | grep -qw "$1"; }
 
@@ -515,7 +522,7 @@ if selected "youtube-music"; then
   is_ytm_exists=0
   rpm -qa | grep -q youtube-music && is_ytm_exists=1
 
-  [ $is_ytm_exists -eq 1 ] && {
+  [ "$is_ytm_exists" -eq 1 ] && {
     echo "$(warn "YouTube Music App is already installed")"
     ask_confirm "Do you want to reinstall?" || proceed_ytm_install=false
   }
@@ -525,7 +532,7 @@ if selected "youtube-music"; then
     echo "Installing YouTube Music App from \"$ytm_release_url\"..."
     (
       set -e
-      [ $is_ytm_exists -eq 1 ] && sudo dnf remove -y youtube-music
+      [ "$is_ytm_exists" -eq 1 ] && sudo dnf remove -y youtube-music
       curl -s "$YTM_DOWNLOAD_URL" | grep browser_download_url | grep x86_64.rpm | cut -d '"' -f 4 | xargs curl -L -o "$HOME/Downloads/youtube-music.rpm"
       sudo dnf install -y "$HOME/Downloads/youtube-music.rpm"
     ) || echo "$(warn "Error while installing Youtube Music App. Try again")"
@@ -544,14 +551,14 @@ if selected "minecraft"; then
   eval "$MC_INSTALLER" || echo "$(warn "Minecraft installation failed. Try later by running this program again")"
 fi
 
-zenity --info \
+yad --info \
   --title="Setup Complete!" \
   --text="🎉 Your Fedora installation is ready to use! Have fun :)\n\nYou can install any app in the default Software App or from browser using .rpm (x86_64), .AppImage or .snap file formats.\n\nWhat was done:\n• Package manager optimized\n• System updated\n• RPM Fusion enabled\n• Essential codecs installed\n• Boot time reduced\n• Terminal utilities installed (zsh, oh-my-zsh)\n• Default music app changed\n• Essential programs installed\n• Unnecessary programs removed\n• System settings tweaked\n• GNOME extensions installed\n• Desktop look configured\n• Selected programs installed\n\n⚠️ Your system needs to reboot for all changes to take effect." \
-  --width=960 --height=540
+  --width=400
 
-zenity --question \
+yad --question \
   --title="Reboot" \
   --text="Do you want to reboot now?" \
-  --ok-label="Reboot now" \
-  --cancel-label="Later" \
-  --width=480 --height=480 && systemctl reboot
+  --button="Reboot now:0" \
+  --button="Later:1" \
+  --width=400 && systemctl reboot
